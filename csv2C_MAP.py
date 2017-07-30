@@ -1,4 +1,5 @@
-#!/usr/bin/python
+#!/usr/bin/python3
+
 # csv2C_MAP.py
 # FB - 201010107
 # First row of the csv file must be header!
@@ -15,66 +16,68 @@ import argparse
 import sys
 import time
 import re
+from os import path
+
 parser = argparse.ArgumentParser(description="Convert C_MAP csv formatted file to C_MAP xml")
 parser.add_argument('infile', nargs='?', type=argparse.FileType('r'),default=sys.stdin)
-parser.add_argument('outfile', nargs='?', type=argparse.FileType('w'),default=sys.stdout)
+parser.add_argument('outfile')
 parser.add_argument('-n', '--name', default='RT', help="specify name for the route")
-
 parser.add_argument('-t', '--type', choices=['point', 'route', 'track'], default = 'track', help="specify type of xml file (waypoint, route, track)")
+parser.add_argument('-d', '--description', default='RT_', help="specify description for the route")
+parser.add_argument('-p', '--pointtype', default='4', help="specify the type of point that will be assigned to each waypoint")
 args = parser.parse_args()
+xmlRowType = {"route":"WAYPOINT", "track":"POINT", "point":"WAYPOINTS"}
+xmlheaders = {"route":"<ROUTE>\n<NAME>"+"nnn"+"</NAME>\n<DESCRIPTION>" + args.description + "</DESCRIPTION>\n", "track":"<TRACK>\n", "point":"<WAYPOINTS>\n"}
+xmlfooters = {"route":"</ROUTE>\n</C_MAP>\n", "track":"</TRACK>\n</C_MAP>\n", "point":"</WAYPOINTS>\n</C_MAP>\n"}
+letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 csvData = csv.reader(args.infile)
-xmlData = args.outfile
-# there must be only one top-level tag
-xmlRecord = '<C_MAP>' + "\n"
-if args.type == "route":
-  xmlRecord += '<ROUTE>' + "\n"
-  xmlRecord += '<NAME>' + args.name + '</NAME>' + '\n'
-  xmlRowType = 'WAYPOINT'
-elif args.type == 'track':
-  xmlRecord += '<TRACK>' + "\n"
-  xmlRowType = 'POINT' 
-elif args.type == 'point':
-  xmlRecord += '<WAYPOINTS>' + "\n"
-  xmlRowType = 'WAYPOINT'
-xmlData.write(xmlRecord)
-tags = csvData.next()
+tags = next(csvData)
 # replace spaces w/ underscores in tag names
 for i in range(len(tags)):
-  tags[i] = tags[i].replace(' ', '_')
+    tags[i] = tags[i].replace(' ', '_')
 # TRACK Files don't have a name, so make sure that we have one in case we want to create a ROUTE
 if 'NAME' not in tags:
-  tags.insert(0,'NAME')
-# files should also have a description, so insert one after the name, if required
-if ('DESCRIPTION' not in tags) and ('DESC' not in tags):
-	tags.insert(tags.index('NAME')+1,'DESCRIPTION')
-rowNum=1
-# TRACK files can have extra rows with zeroed out latitude and longitude, this regex will find them
-regex = re.compile(r"0?00\s00\.000\s(N|W|E|S)")
+    tags.insert(0,'NAME')
+if 'TYPE' not in tags:
+    tags.insert(tags.index('NAME')+1,'TYPE')
+rowNum=0
+# TRACK files can have multiple segments with zeroed out latitude and longitude as the delimiter between the two segments.
+# When we find one of these, we will start a new XML file.
+# This regex will find the segment delimiter.
 
+regex1 = re.compile(r"0?00\s00\.000\s(N|W|E|S)")
+
+fileNum = 0
+endOfSegment = True
+xmlData = open(args.outfile, "w")
+baseFileName, baseFileExt = path.splitext(xmlData.name)
 for row in csvData:
-# This is the equivalent of "for 'regex' in list: Search for the regex and set a switch if found
-  for item in row:
-	extraRow = False
-	if regex.search(item):
-	  extraRow = True
-	  break
-# TRACK Files don't have names or descriptions, add them in with derived versions
-  if not extraRow:
-	while len(row) < len(tags):
-		row.insert(0,args.name + '{0}'.format(rowNum))
-# At this point in the process, we have a 
-	xmlData.write('<' + xmlRowType + '>' + "\n")
-	for tag, item in zip(tags, row):
-		xmlData.write('    ' + '<' + tag + '>' \
+    if endOfSegment or rowNum > 99:
+        xmlRecord = '<C_MAP>' + "\n" + xmlheaders[args.type]
+        xmlRecord = xmlRecord.replace("<NAME>nnn","<NAME>"+args.name+letter[fileNum])
+        xmlData.write(xmlRecord)
+        rowNum = 0
+    for item in row:
+        endOfSegment = False
+        if regex1.search(item):
+            endOfSegment = True
+# TRACK Files don't have names or types, add them in with derived or specified versions
+    if not endOfSegment:
+        row.insert(0,args.pointtype)
+        row.insert(0,args.name + letter[fileNum] + "_" + '{0}'.format(rowNum))
+# At this point in the process, we have a fully populated row that can be written out as an xml item
+    xmlData.write("<" + xmlRowType[args.type] + ">" + "\n")
+    for tag, item in zip(tags, row):
+        xmlData.write('    ' + '<' + tag + '>' \
                           + item + '</' + tag + '>' + "\n")
-	xmlData.write('</' + xmlRowType + '>' + "\n")
-	rowNum +=1
-if args.type == "route":
-  xmlRecord = '</ROUTE>'
-elif args.type == 'track':
-  xmlRecord = '</TRACK>'
-elif args.type == 'point' :
-  xmlRecord = '</WAYPOINTS>'
-xmlData.write(xmlRecord + '\n' + '</C_MAP>' + '\n')
+    xmlData.write("</" + xmlRowType[args.type] + ">" + "\n")
+    rowNum +=1
+    if endOfSegment or rowNum > 99:
+        xmlRecord = xmlfooters[args.type]
+        xmlData.write(xmlRecord)
+        xmlData.close()
+        fileNum += 1
+        xmlData = open(baseFileName + "_" + '{0}'.format(fileNum) + baseFileExt, "w")
+xmlRecord = xmlfooters[args.type]
+xmlData.write(xmlRecord)
 xmlData.close()
-
