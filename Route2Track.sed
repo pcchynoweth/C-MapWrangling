@@ -1,0 +1,6 @@
+#!/usr/bin/sed
+s/ROUTE/TRACK/
+s/WAYPOINT/POINT/
+/COLOR/d
+/DESCRIPTION/d
+/NAME/d
