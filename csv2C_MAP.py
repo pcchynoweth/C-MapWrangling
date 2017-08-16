@@ -18,13 +18,14 @@ import sys
 import time
 import re
 from os import path
-from os import remove
+from pygeodesy import dms
 
 parser = argparse.ArgumentParser(description="Convert C_MAP csv formatted file to C_MAP xml")
 parser.add_argument('infile', nargs='?', type=argparse.FileType('r'),default=sys.stdin)
 parser.add_argument('outfile')
 parser.add_argument('-n', '--name', default='RT', help="specify name for the route")
 parser.add_argument('-t', '--type', choices=['point', 'route', 'track'], default = 'track', help="specify type of xml file (waypoint, route, track)")
+parser.add_argument('-f', '--format', choices=['d', 'dm', 'dms'], default = 'd', help="specify format for the 'latitude' and 'longitude' fields (d = decimal degrees, dm = degrees and decimal minutes, dms = degrees, minutes and decimal seconds)")
 parser.add_argument('-d', '--description', default='RT_', help="specify description for the route")
 parser.add_argument('-p', '--pointtype', default='4', help="specify the type of point that will be assigned to each waypoint")
 parser.add_argument('-r', '--replace', default=False, action='store_true', help="if name is specified in the csv file replace it with those specified in the options")
@@ -32,6 +33,8 @@ args = parser.parse_args()
 xmlRowType = {"route":"WAYPOINT", "track":"POINT", "point":"WAYPOINTS"}
 xmlheaders = {"route":"<ROUTE>\n<NAME>"+"nnn"+"</NAME>\n<DESCRIPTION>" + args.description + "</DESCRIPTION>\n", "track":"<TRACK>\n", "point":"<WAYPOINTS>\n"}
 xmlfooters = {"route":"</ROUTE>\n</C_MAP>\n", "track":"</TRACK>\n</C_MAP>\n", "point":"</WAYPOINTS>\n</C_MAP>\n"}
+lat_list = ["LATITUDE", "LAT" ]
+lon_list = ["LONGITUDE", "LON", "LONG"]
 letter = string.ascii_uppercase
 csvData = csv.reader(args.infile)
 tags = next(csvData)
@@ -40,9 +43,11 @@ for i in range(len(tags)):
     tags[i] = tags[i].replace(' ', '_')
 # TRACK Files don't have a name, so make sure that we have one in case we want to create a ROUTE
 if 'NAME' not in tags:
+    print("DEBUG1: NAME was not found in the list of tags!")
     tags.insert(0,'NAME')
     namePresent = False
 else:
+    print("DEBUG2: Setting the namePresent flag to True")
     namePresent = True
 if 'TYPE' not in tags:
     tags.insert(tags.index('NAME')+1,'TYPE')
@@ -63,10 +68,7 @@ if "." in baseFileName:
     baseFileName = baseParts[0]
     baseFileExt = "." + ".".join(baseParts[1:]) + baseFileExt
 
-xmlData = open(baseFileName + "_" + '{0}'.format(fileNum) + baseFileExt, "w")
-xmlRecord = '<C_MAP>' + "\n" + xmlheaders[args.type]
-xmlRecord = xmlRecord.replace("<NAME>nnn","<NAME>"+args.name+letter[(fileNum-1)%len(letter)])
-xmlData.write(xmlRecord)
+xmlBuffer = ""
 rowWritten = False
 
 for row in csvData:
@@ -82,29 +84,40 @@ for row in csvData:
         elif args.replace:
             row[tags.index('NAME')] = args.name + letter[fileNum-1] + "_" + '{0}'.format(rowNum)
         row.insert(tags.index('TYPE'),args.pointtype)
-# At this point in the process, we have a fully populated row that can be written out as an xml item
-        xmlData.write("<" + xmlRowType[args.type] + ">" + "\n")
+# At this point in the process, we have a fully populated row that can be buffered as an xml item
+        xmlBuffer += "<" + xmlRowType[args.type] + ">" + "\n"
         for tag, item in zip(tags, row):
-            xmlData.write('    ' + '<' + tag + '>' \
-                          + item + '</' + tag + '>' + "\n")
-        xmlData.write("</" + xmlRowType[args.type] + ">" + "\n")
+# Make sure that the LATITUDE and LONGITUDE are in the format specified by the "format" option
+            if tag.upper() in lat_list:
+                item = dms.normDMS(dms.latDMS(dms.parseDMS(item),args.format, 3), norm = " ")
+                
+            if tag.upper() in lon_list:
+                item = dms.normDMS(dms.lonDMS(dms.parseDMS(item),args.format, 3), norm = " ")
+            xmlBuffer += '    ' + '<' + tag + '>' \
+                          + item + '</' + tag + '>' + "\n"
+        xmlBuffer += "</" + xmlRowType[args.type] + ">" + "\n"
         rowNum +=1
         rowWritten = True
     else:
-        xmlRecord = xmlfooters[args.type]
-        xmlData.write(xmlRecord)
-        xmlData.close()
-        if not rowWritten:
-            remove(xmlData.name)
+        if rowWritten:
+            xmlData = open(baseFileName + "_" + '{0}'.format(fileNum) + baseFileExt, "w")
+            xmlRecord = '<C_MAP>' + "\n" + xmlheaders[args.type]
+            xmlRecord = xmlRecord.replace("<NAME>nnn","<NAME>"+args.name+letter[(fileNum-1)%len(letter)])
+            xmlData.write(xmlRecord)
+            xmlData.write(xmlBuffer)
+            xmlRecord = xmlfooters[args.type]
+            xmlData.write(xmlRecord)
+            xmlData.close()
         fileNum += 1
         rowNum = 0
-        xmlData = open(baseFileName + "_" + '{0}'.format(fileNum) + baseFileExt, "w")
-        xmlRecord = '<C_MAP>' + "\n" + xmlheaders[args.type]
-        xmlRecord = xmlRecord.replace("<NAME>nnn","<NAME>"+args.name+letter[(fileNum-1)%len(letter)])
-        xmlData.write(xmlRecord)
+        xmlBuffer = ""
         rowWritten = False
-xmlRecord = xmlfooters[args.type]
-xmlData.write(xmlRecord)
-xmlData.close()
-if not rowWritten:
-    remove(xmlData.name)
+if rowWritten:
+    xmlData = open(baseFileName + "_" + '{0}'.format(fileNum) + baseFileExt, "w")
+    xmlRecord = '<C_MAP>' + "\n" + xmlheaders[args.type]
+    xmlRecord = xmlRecord.replace("<NAME>nnn","<NAME>"+args.name+letter[(fileNum-1)%len(letter)])
+    xmlData.write(xmlRecord)
+    xmlData.write(xmlBuffer)
+    xmlRecord = xmlfooters[args.type]
+    xmlData.write(xmlRecord)
+    xmlData.close()
