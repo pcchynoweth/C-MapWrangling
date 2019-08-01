@@ -50,7 +50,7 @@ for row in csvData:
         new_route.append(row2)
         row1=row2
     row2=row3
-new_route.append(row)
+new_route.append(row3)
 with open(args.removed_file, "w") as df:
     for i in range(0,len(deleted_points)):
         df.write(",".join(deleted_points[i])+"\n")
