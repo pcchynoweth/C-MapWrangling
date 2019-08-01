@@ -46,14 +46,9 @@ for row in csvData:
     differences.append((row2[tags.index('NAME')],point1,point2,point3,distance1,distance2,distance3,distance4,args.threshhold))
     if (distance4-distance3) < float(args.threshhold):
         deleted_points.append(row2)
+    else:  
+        new_route.append(row2)
         row1=row2
-        row2=row3
-        try:
-            row3=next(csvData)
-        except StopIteration:
-            break
-    new_route.append(row2)
-    row1=row2
     row2=row3
 new_route.append(row)
 with open(args.removed_file, "w") as df:
